@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skype Chat Export Viewer</title>
+    <style>
+        /* Basic styling */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            height: 100vh;
+            display: flex; /* Use flex for initial centering */
+            justify-content: center; /* Center file input horizontally */
+            align-items: center; /* Center file input vertically */
+        }
+        /* Container for the main chat view */
+        .container {
+            display: flex;
+            height: 100vh;
+            width: 100%; /* Take full width when visible */
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            /* Initially hidden, shown via JS after file load */
+            display: none;
+        }
+        /* Sidebar for conversation list */
+        .sidebar {
+            width: 320px;
+            border-right: 1px solid #ddd;
+            overflow-y: auto;
+            background-color: #f0f0f0;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+        }
+        /* Main content area for messages */
+        .content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+        /* User info section */
+        .user-info {
+            padding: 12px 15px;
+            background-color: #e8e8e8;
+            border-bottom: 1px solid #ddd;
+            font-size: 0.9em;
+            flex-shrink: 0; /* Prevent shrinking */
+        }
+        /* Search input container */
+        .search-container {
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+            background-color: #e8e8e8;
+            flex-shrink: 0; /* Prevent shrinking */
+        }
+        .search-container input {
+            width: calc(100% - 12px); /* Account for padding */
+            padding: 6px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        /* Conversation list container */
+        .conversation-list-container {
+             flex: 1; /* Allow growing and scrolling */
+             overflow-y: auto;
+        }
+        /* Individual conversation item */
+        .conversation-item {
+            padding: 12px 15px;
+            border-bottom: 1px solid #ddd;
+            cursor: pointer;
+            transition: background-color 0.1s ease-in-out;
+            color: #333; /* Default text color */
+            text-decoration: none !important; /* Force no underline */
+        }
+        .conversation-item:hover {
+            background-color: #e0e0e0;
+            color: #333;
+            text-decoration: none;
+        }
+        .conversation-item.active {
+            background-color: #007fff;
+            color: white; /* Active text color */
+            text-decoration: none;
+        }
+        /* Ensure links within items inherit color correctly */
+        .conversation-item a {
+             color: inherit !important;
+             text-decoration: none !important;
+         }
+        /* Conversation name styling */
+        .conversation-name {
+            font-weight: bold;
+            margin-bottom: 3px;
+            word-wrap: break-word; /* Wrap long names */
+            color: inherit;
+            text-decoration: none !important;
+        }
+        /* Preview text styling */
+        .conversation-preview {
+            font-size: 0.85em;
+            color: #666; /* Default preview color */
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+            text-decoration: none !important;
+        }
+         .conversation-item.active .conversation-preview {
+             color: #f0f0f0; /* Lighter preview color when active */
+             text-decoration: none !important;
+         }
+        /* Message bubble styling */
+        .message {
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            border-radius: 18px;
+            max-width: 75%;
+            word-wrap: break-word;
+            background-color: #e5e5ea; /* Default incoming message */
+            align-self: flex-start; /* Align left */
+            border: 1px solid #ddd;
+            position: relative;
+        }
+        /* Outgoing message styling */
+        .message.me {
+            background-color: #0b93f6; /* Skype blue */
+            color: white;
+            align-self: flex-end; /* Align right */
+            border-color: #0b93f6;
+        }
+        /* Message header (sender/time) container */
+        .message-header {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: 5px 10px; /* Space between sender and time */
+            margin-bottom: 5px;
+            font-size: 0.75em;
+            color: #555;
+            line-height: 1.2;
+        }
+        .message.me .message-header {
+            color: #f0f0f0; /* Lighter color on outgoing messages */
+            justify-content: flex-end; /* Align time to the right if sender is hidden */
+        }
+        /* Message sender name */
+        .message-sender {
+            font-weight: bold;
+            color: #333;
+            flex-shrink: 0;
+        }
+        /* Hide sender name for own messages */
+        .message.me .message-sender {
+             display: none;
+        }
+        /* Message timestamp */
+        .message-time {
+            color: #888;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+         .message.me .message-time {
+            color: #e0e0e0; /* Lighter timestamp for own messages */
+         }
+        /* Message content area */
+        .message-content {
+            font-size: 0.95em;
+            line-height: 1.4;
+        }
+        /* Link styling within messages */
+        .message-content a {
+            color: #007fff; /* Standard link color */
+            text-decoration: underline;
+            word-break: break-all; /* Break long URLs */
+        }
+        .message.me .message-content a {
+            color: #ffffff; /* White links on outgoing messages */
+        }
+        /* Preformatted text (code snippets) styling */
+        .message-content pre {
+            background-color: #eee;
+            padding: 8px;
+            border-radius: 4px;
+            white-space: pre-wrap; /* Wrap long lines */
+            word-wrap: break-word;
+            font-family: monospace;
+            font-size: 0.9em;
+            border: 1px solid #ddd;
+            color: #333;
+            max-width: 100%; /* Prevent overflow */
+            overflow-x: auto; /* Add scrollbar if needed */
+        }
+        .message.me .message-content pre {
+             background-color: #0a7fdb; /* Darker blue for code on outgoing */
+             color: #ffffff;
+             border-color: #0a7fdb;
+        }
+        /* Call info styling (if ever implemented) */
+        .call-info {
+            font-style: italic;
+            color: #555;
+        }
+        /* Loading indicator styling */
+        .loading {
+            text-align: center;
+            padding: 20px;
+            font-style: italic;
+            color: #777;
+            width: 100%;
+        }
+        /* System message styling (e.g., user added/removed) */
+        .system-message {
+            font-style: italic;
+            color: #888;
+            text-align: center;
+            align-self: center; /* Center horizontally */
+            background-color: #f0f0f0;
+            padding: 6px 12px;
+            border-radius: 10px;
+            margin: 10px 0;
+            max-width: 90%;
+            font-size: 0.85em;
+            word-wrap: break-word;
+        }
+        /* Message for empty conversation list */
+        .no-conversations {
+            padding: 20px;
+            text-align: center;
+            color: #777;
+        }
+        /* Initial file input prompt area */
+        .file-input-container {
+            text-align: center;
+            padding: 30px;
+            border: 2px dashed #ddd;
+            margin: 30px; /* Provides some space */
+            max-width: 600px;
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            /* Initially visible, hidden via JS after file load */
+            display: block;
+        }
+        /* Style the label to look like a button */
+        .file-input-container label {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 15px;
+            font-weight: bold;
+            transition: background-color 0.2s;
+        }
+        .file-input-container label:hover {
+            background-color: #0056b3;
+        }
+        /* Hide the default file input visually */
+        .file-input-container input[type="file"] {
+            display: none;
+        }
+
+    </style>
+</head>
+<body>
+    <!-- File Input Container - Visible initially -->
+    <div class="file-input-container" id="fileInputDiv">
+        <h2>Skype Chat Export Viewer</h2>
+        <p>Please select your Skype export <code>messages.json</code> file to view the chats.</p>
+        <!-- The label triggers the hidden file input -->
+        <label for="fileInput">Select messages.json File</label>
+        <input type="file" id="fileInput" accept=".json">
+        <p><small>The file will be processed locally in your browser and not uploaded anywhere.</small></p>
+    </div>
+
+    <!-- Main Chat Container - Hidden until file is loaded -->
+    <div class="container" id="mainContainer">
+        <div class="sidebar">
+            <div class="user-info" id="userInfo">Loading user info...</div>
+            <div class="search-container">
+                <input type="text" id="searchInput" placeholder="Search conversations...">
+            </div>
+            <div class="conversation-list-container" id="conversationsList">
+                <div class="loading">Loading conversations...</div>
+            </div>
+        </div>
+        <div class="content" id="messagesContent">
+            <div class="loading">Select a conversation to view messages</div>
+        </div>
+    </div>
+
+    <!-- JavaScript -->
+    <script>
+        // Global variable to hold the parsed Skype data
+        let skypeData = null;
+
+        // DOM element references
+        const fileInput = document.getElementById('fileInput');
+        const mainContainer = document.getElementById('mainContainer'); // Use ID for consistency
+        const fileInputDiv = document.getElementById('fileInputDiv');
+        const userInfoElement = document.getElementById('userInfo');
+        const conversationsList = document.getElementById('conversationsList');
+        const messagesContent = document.getElementById('messagesContent');
+        const searchInput = document.getElementById('searchInput');
+
+        // Regex pattern to identify and potentially hide common system messages
+        // Matches strings starting with a 13+ digit timestamp, colon, non-space, colon, non-space
+        // e.g., "1678886400000:some_user:added_other_user"
+        const systemMsgPatternToHide = /^\d{13,}:\S+:\S+/;
+
+        // Event listener for file selection
+        fileInput.addEventListener('change', handleFileSelect);
+
+        /**
+         * Handles the file selection event.
+         * Reads the file, parses JSON, and initiates the display process.
+         * @param {Event} event - The file input change event.
+         */
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) {
+                return; // No file selected
+            }
+
+            // Basic check for the expected filename
+            if (file.name !== 'messages.json') {
+                alert("Please select the 'messages.json' file from your Skype export.");
+                fileInput.value = null; // Clear the input for re-selection
+                return;
+            }
+
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                try {
+                    skypeData = JSON.parse(e.target.result);
+                    // Hide file input prompt, show main chat container
+                    fileInputDiv.style.display = 'none';
+                    document.body.style.justifyContent = 'flex-start'; // Reset body alignment
+                    document.body.style.alignItems = 'flex-start';
+                    mainContainer.style.display = 'flex'; // Show the main chat view
+                    displayData(); // Process and display the loaded data
+                } catch (error) {
+                    alert('Error parsing the JSON file: ' + error.message + "\n\nPlease ensure it's the correct, unmodified 'messages.json' file.");
+                    showFileInput(); // Show input prompt again on error
+                }
+            };
+
+            reader.onerror = function() {
+                alert('Error reading the file.');
+                showFileInput(); // Show input prompt again on error
+            };
+
+            reader.readAsText(file); // Read the file content as text
+        }
+
+        /**
+         * Resets the UI to show the file input prompt and hides the main container.
+         * Clears potentially problematic global state.
+         */
+        function showFileInput() {
+            fileInputDiv.style.display = 'block';
+            mainContainer.style.display = 'none';
+            document.body.style.justifyContent = 'center'; // Re-center prompt
+            document.body.style.alignItems = 'center';
+            fileInput.value = null; // Clear the file input
+            skypeData = null; // Clear potentially corrupt data
+            // Clear previous UI elements
+            userInfoElement.innerHTML = 'Loading user info...';
+            conversationsList.innerHTML = '<div class="loading">Loading conversations...</div>';
+            messagesContent.innerHTML = '<div class="loading">Select a conversation to view messages</div>';
+        }
+
+
+        /**
+         * Initializes the display after data is successfully loaded.
+         * Populates user info and renders the initial conversation list.
+         */
+        function displayData() {
+            // Validate essential data structure
+            if (!skypeData || !skypeData.userId || !Array.isArray(skypeData.conversations)) {
+                alert('Invalid Skype export file format: Missing required data (userId or conversations array).');
+                showFileInput();
+                return;
+            }
+
+            const userId = skypeData.userId;
+            const exportDate = skypeData.exportDate ? new Date(skypeData.exportDate).toLocaleString() : 'N/A';
+            userInfoElement.innerHTML = `
+                <div><strong>Your User ID:</strong> ${escapeHtml(userId)}</div>
+                <div><strong>Export Date:</strong> ${exportDate}</div>
+            `;
+
+            renderConversationsList(skypeData.conversations || []);
+
+            // Add search listener (remove previous one if any to avoid duplicates)
+            searchInput.removeEventListener('input', handleSearch);
+            searchInput.addEventListener('input', handleSearch);
+        }
+
+        /**
+         * Handles the search input event, filtering the conversation list.
+         */
+        function handleSearch() {
+            const searchTerm = this.value.toLowerCase().trim();
+            renderConversationsList(skypeData.conversations || [], searchTerm);
+        }
+
+        /**
+         * Checks if a conversation contains at least one message considered 'displayable'
+         * (i.e., not just hidden system messages or calls).
+         * @param {object} conversation - The conversation object.
+         * @returns {boolean} - True if it contains displayable messages, false otherwise.
+         */
+        function conversationHasUserMessages(conversation) {
+            if (!conversation || !conversation.MessageList || conversation.MessageList.length === 0) return false;
+
+            for (const message of conversation.MessageList) {
+                 // Check if it's a standard user message OR a system message we DON'T explicitly hide
+                 if (messageIsUserDisplayable(message) ||
+                   (message.messagetype && message.messagetype.includes('ThreadActivity') && !systemMsgPatternToHide.test(message.content || ''))) {
+                     return true; // Found one, no need to check further
+                }
+            }
+            return false; // No displayable messages found
+        }
+
+        /**
+         * Renders the list of conversations in the sidebar.
+         * Sorts conversations by the timestamp of the last message.
+         * Filters based on the search term and whether the conversation has displayable messages.
+         * @param {Array} conversations - The array of conversation objects.
+         * @param {string} [searchTerm=''] - The search term to filter by.
+         */
+        function renderConversationsList(conversations, searchTerm = '') {
+            if (!conversations || conversations.length === 0) {
+                conversationsList.innerHTML = '<div class="no-conversations">No conversations found in the export.</div>';
+                return;
+            }
+
+            const sortedConversations = [...conversations]
+                // Ensure conversation object and ID exist
+                .filter(c => c && c.id)
+                // Map to include calculated latestTime and lastMsg for sorting/preview
+                .map(conv => {
+                    let latestTime = 0;
+                    let lastMsg = null;
+                    // Find the latest message time within MessageList
+                    if (conv.MessageList && Array.isArray(conv.MessageList)) {
+                        for (let i = conv.MessageList.length - 1; i >= 0; i--) { // Iterate backwards (often faster for finding latest)
+                            const msg = conv.MessageList[i];
+                            if (msg && msg.originalarrivaltime) {
+                                const time = new Date(msg.originalarrivaltime).getTime();
+                                if (time > latestTime) {
+                                    latestTime = time;
+                                    lastMsg = msg; // Store the last message object
+                                }
+                            }
+                        }
+                    }
+                    // Fallback if MessageList is missing/empty but lastMessageDate exists
+                    if (latestTime === 0 && conv.lastMessageDate) {
+                         latestTime = new Date(conv.lastMessageDate).getTime();
+                    }
+                    return { ...conv, latestTime: latestTime, lastMsg: lastMsg };
+                })
+                // Sort by latest message time, descending (newest first)
+                .sort((a, b) => b.latestTime - a.latestTime)
+                // Filter out conversations that only contain hidden system messages
+                .filter(c => conversationHasUserMessages(c));
+
+            let html = '';
+            let foundMatches = false;
+
+            sortedConversations.forEach(conversation => {
+                const displayName = conversation.displayName || conversation.id || 'Unknown Conversation';
+                // Apply search filter (case-insensitive)
+                if (searchTerm && !displayName.toLowerCase().includes(searchTerm)) return;
+
+                foundMatches = true;
+                let lastMessageText = 'No eligible messages';
+                const lastMessage = conversation.lastMsg; // Use the stored last message
+
+                // Generate preview text based on the last message
+                if (lastMessage) {
+                    const tempDiv = document.createElement('div'); // Use temporary element for text extraction
+                    if (messageIsUserDisplayable(lastMessage)) {
+                         if (lastMessage.messagetype === 'RichText' || lastMessage.messagetype === 'Text') {
+                            // Process content to handle HTML entities/tags, then get text
+                            tempDiv.innerHTML = processMessageContent(lastMessage.content || '', lastMessage.messagetype);
+                            lastMessageText = (tempDiv.textContent || tempDiv.innerText || '').trim();
+                            if (!lastMessageText) lastMessageText = '[Empty message]';
+                        } else if (lastMessage.messagetype === 'RichText/UriObject') {
+                            lastMessageText = 'Shared link/media/file'; // Simplified preview
+                        } else if (lastMessage.messagetype === 'RichText/Media_Card') {
+                            lastMessageText = 'Shared card';
+                        } else {
+                             lastMessageText = `[${lastMessage.messagetype}]`; // Fallback for other user types
+                        }
+                    // Handle visible system messages (those not filtered by the regex)
+                    } else if (lastMessage.messagetype && lastMessage.messagetype.includes('ThreadActivity') && !systemMsgPatternToHide.test(lastMessage.content || '')) {
+                        lastMessageText = escapeHtml(lastMessage.content || 'Group activity');
+                    } else if (lastMessage.messagetype && lastMessage.messagetype.includes('Call')) {
+                        lastMessageText = 'Call activity'; // Generic call preview
+                    } else {
+                        // Catch-all for other non-displayable types (should be rare after filtering)
+                        lastMessageText = 'System event';
+                    }
+                    // Trim preview text
+                    if (lastMessageText.length > 45) {
+                        lastMessageText = lastMessageText.substring(0, 45) + '...';
+                    }
+                }
+
+                // Generate HTML for the conversation item
+                html += `
+                    <div class="conversation-item" data-id="${conversation.id}" title="${escapeHtml(displayName)}">
+                        <div class="conversation-name">${escapeHtml(displayName)}</div>
+                        <div class="conversation-preview">${escapeHtml(lastMessageText)}</div>
+                    </div>
+                `;
+            });
+
+            // Update the conversation list HTML
+            conversationsList.innerHTML = foundMatches ? html : `<div class="no-conversations">No matching conversations found for "${escapeHtml(searchTerm)}"</div>`;
+
+            // Add click listeners to the newly rendered items
+            document.querySelectorAll('.conversation-item').forEach(item => {
+                item.removeEventListener('click', handleConversationClick); // Prevent duplicate listeners
+                item.addEventListener('click', handleConversationClick);
+            });
+        }
+
+        /**
+         * Handles clicking on a conversation item in the list.
+         * Sets the active state and triggers message display.
+         */
+        function handleConversationClick() {
+            // Remove active class from previously selected item
+            document.querySelectorAll('.conversation-item.active').forEach(i => i.classList.remove('active'));
+            // Add active class to the clicked item
+            this.classList.add('active');
+            // Display messages for the selected conversation ID
+            displayMessages(this.getAttribute('data-id'));
+        }
+
+        /**
+         * Determines if a message should be displayed as a standard user message bubble.
+         * Filters out calls, control messages, specific member activities, and noisy system text.
+         * @param {object} message - The message object.
+         * @returns {boolean} - True if the message is considered a user-displayable message.
+         */
+        function messageIsUserDisplayable(message) {
+            if (!message || !message.messagetype) return false;
+
+            // Explicitly filter out types we *never* want in bubbles
+            if (message.messagetype.includes('Event/Call')) return false; // Call start/end events
+            if (message.messagetype.startsWith('Control/')) return false;  // Control messages (e.g., typing indicators)
+            if (message.messagetype === 'ThreadActivity/AddMember') return false; // Handled separately as system message if needed
+            if (message.messagetype === 'ThreadActivity/DeleteMember') return false; // Handled separately
+
+            // Filter out specific system-like text content patterns, even if type is 'Text'
+             if ((message.messagetype === 'Text' || message.messagetype.includes('ThreadActivity'))
+                && systemMsgPatternToHide.test(message.content || '')) {
+                    return false;
+                }
+
+            // Allow common message types
+            return message.messagetype === 'RichText' ||
+                   message.messagetype === 'Text' ||
+                   message.messagetype === 'RichText/UriObject' || // Links, files, images, videos
+                   message.messagetype === 'RichText/Media_Card'; // Cards (e.g., polls, location)
+        }
+
+        /**
+         * Processes the raw message content based on its type and formats it as HTML.
+         * Handles basic formatting (bold, italic, strikethrough, links, preformatted text)
+         * and specific object types like links, images, files.
+         * @param {string} rawContent - The raw content string from the message object.
+         * @param {string} messageType - The messagetype string.
+         * @returns {string} - HTML-formatted string ready for display.
+         */
+        function processMessageContent(rawContent, messageType) {
+            let content = '';
+            rawContent = rawContent || ''; // Ensure rawContent is a string
+
+            // --- Handle standard text/rich text messages ---
+            if (messageType === 'RichText' || messageType === 'Text') {
+                // Start by escaping any existing HTML in the content itself
+                content = escapeHtml(rawContent);
+
+                // Process known safe HTML tags (basic formatting)
+                content = content
+                    // Links: Decode '&' in href, ensure https/http, add target/rel
+                    .replace(/<a\s+href="([^&]+)"([^&]*)>(.*?)<\/a>/gi, (match, href, otherAttrs, text) => {
+                        const decodedHref = href.replace(/&/g, '&'); // Decode & -> & in URL
+                        // Basic sanitization of other attributes (allow only spaces and known safe chars)
+                        // This is a very basic attempt, more robust sanitization might be needed for complex cases.
+                        const safeOtherAttrs = (otherAttrs || '').replace(/"/g, '"').replace(/</g, '<').replace(/>/g, '>');
+                        if (decodedHref.startsWith('http://') || decodedHref.startsWith('https://')) {
+                            return `<a href="${escapeHtml(decodedHref)}" ${safeOtherAttrs} target="_blank" rel="noopener noreferrer">${text}</a>`;
+                        } else {
+                            return text; // Don't render non-http(s) links as clickable
+                        }
+                    })
+                    // Basic formatting tags
+                    .replace(/<b>(.*?)<\/b>/gi, '<b>$1</b>')
+                    .replace(/<i>(.*?)<\/i>/gi, '<i>$1</i>')
+                    .replace(/<s>(.*?)<\/s>/gi, '<s>$1</s>')
+                    // Preformatted text (code snippets) - use non-greedy match for content
+                    .replace(/<pre.*?>(.*?)<\/pre>/gis, (match, preContent) => {
+                        // Content inside <pre> is already escaped, so return it within real <pre> tags
+                        return `<pre>${preContent}</pre>`;
+                    })
+                    // Skype smileys/emoticons (render the type as text for now)
+                    .replace(/<ss type="([^&]*)">(.*?)<\/ss>/gi, ' [emoji:$1] ')
+                    // Replace escaped newlines with <br> tags
+                    .replace(/\n/g, '<br>');
+
+                // Handle messages that are effectively empty after processing
+                if (!content.trim().replace(/<br\s*\/?>/gi, '')) {
+                     content = '[Empty message]';
+                 }
+
+            // --- Handle shared links, images, videos, files ---
+            } else if (messageType === 'RichText/UriObject') {
+                let linkUrl = '#';
+                let linkText = 'Shared Link/Media';
+                let imgSrc = null;
+                const contentStr = rawContent; // Already a string
+
+                // Extract the main URI
+                const uriMatch = contentStr.match(/<URI\s+uri="([^"]+)"/);
+                if (uriMatch && uriMatch[1]) linkUrl = uriMatch[1];
+
+                // Extract Title or Description for link text
+                const titleMatch = contentStr.match(/<Title[^>]*>([^<]+)<\/Title>/);
+                const descMatch = contentStr.match(/<Description[^>]*>([^<]+)<\/Description>/);
+                linkText = escapeHtml(
+                    (titleMatch && titleMatch[1])
+                    ? titleMatch[1]
+                    : (descMatch && descMatch[1] ? descMatch[1] : linkUrl) // Fallback chain
+                );
+
+                // Check object type for specific handling
+                if (contentStr.includes('<URIObject type="Picture.1">')) {
+                    const thumbMatch = contentStr.match(/url_thumbnail="([^"]+)"/);
+                    if (thumbMatch && thumbMatch[1]) imgSrc = thumbMatch[1];
+                    linkText = 'Shared Image';
+                } else if (contentStr.includes('<URIObject type="Video.1">')) {
+                    const thumbMatch = contentStr.match(/url_thumbnail="([^"]+)"/);
+                    if (thumbMatch && thumbMatch[1]) imgSrc = thumbMatch[1];
+                    linkText = 'Shared Video';
+                } else if (contentStr.includes('<URIObject type="File.1">')) {
+                    const fileTitleMatch = contentStr.match(/<Title\s+type="file">([^<]+)<\/Title>/);
+                    linkText = `Shared File: ${escapeHtml(fileTitleMatch && fileTitleMatch[1] ? fileTitleMatch[1] : 'Unknown File')}`;
+                     // Note: Skype exports don't contain the actual file, just metadata. Link might be dead.
+                }
+
+                // Construct base HTML (the link)
+                content = `<a href="${escapeHtml(linkUrl)}" target="_blank" rel="noopener noreferrer">${linkText}</a>`;
+
+                // Add image thumbnail if available
+                if (imgSrc) {
+                    content += `<br><img src="${escapeHtml(imgSrc)}" alt="${escapeHtml(linkText)} thumbnail" style="max-width: 200px; max-height: 200px; margin-top: 5px; border-radius: 5px; display: block;">`;
+                }
+
+            // --- Handle Media Cards (like polls, locations) ---
+            } else if (messageType === 'RichText/Media_Card') {
+                // Extract text content by stripping HTML tags
+                let cardText = rawContent.replace(/<[^>]*>?/gm, '').trim();
+                cardText = cardText || "Card Content"; // Default if no text found
+                // Try to find a link within the card
+                const cardLinkMatch = rawContent.match(/<a\s+href="([^"]+)"/);
+
+                content = escapeHtml(cardText);
+                if (cardLinkMatch && cardLinkMatch[1]) {
+                    // Add a generic link if one exists in the card data
+                    content += ` <a href="${escapeHtml(cardLinkMatch[1])}" target="_blank" rel="noopener noreferrer">(View Details)</a>`;
+                }
+
+            // --- Fallback for unsupported types ---
+             } else {
+                 content = `[Unsupported message type: ${escapeHtml(messageType)}]`;
+             }
+            return content;
+        }
+
+        /**
+         * Displays messages for a given conversation ID in the main content area.
+         * Filters messages, formats them, and handles user vs. other messages.
+         * @param {string} conversationId - The ID of the conversation to display.
+         */
+        function displayMessages(conversationId) {
+            if (!skypeData) {
+                messagesContent.innerHTML = '<div class="loading">Data not loaded correctly. Please reload.</div>';
+                return;
+            }
+
+            const conversation = skypeData.conversations.find(c => c && c.id === conversationId);
+            if (!conversation) {
+                messagesContent.innerHTML = '<div class="loading">Conversation data not found.</div>';
+                return;
+            }
+            if (!conversation.MessageList || !Array.isArray(conversation.MessageList) || conversation.MessageList.length === 0) {
+                messagesContent.innerHTML = `<div class="loading">No messages found in this conversation.</div>`;
+                return;
+            }
+
+            // Sort messages by arrival time (ascending - oldest first)
+            const sortedMessages = [...conversation.MessageList]
+                .filter(m => m && m.originalarrivaltime) // Ensure message and time exist
+                .sort((a, b) => new Date(a.originalarrivaltime) - new Date(b.originalarrivaltime));
+
+            let html = '';
+            const myUserId = skypeData.userId;
+
+            sortedMessages.forEach(message => {
+                const time = new Date(message.originalarrivaltime).toLocaleString();
+
+                // --- Render standard user message bubbles ---
+                if (messageIsUserDisplayable(message)) {
+                    const isMe = message.from === myUserId;
+                    // Use displayName if available, otherwise fall back to 'from' ID
+                    const senderName = message.displayName || message.from || 'Unknown Sender';
+                    const sender = escapeHtml(isMe ? 'Me' : senderName); // Display 'Me' for own messages
+                    const content = processMessageContent(message.content, message.messagetype);
+                    const messageClass = isMe ? 'message me' : 'message'; // Apply 'me' class for styling
+
+                    html += `
+                        <div class="${messageClass}">
+                            <div class="message-header">
+                                ${!isMe ? `<span class="message-sender">${sender}</span>` : ''}
+                                <span class="message-time">${time}</span>
+                            </div>
+                            <div class="message-content">${content}</div>
+                        </div>`;
+                }
+                // --- Render specific system messages (those not filtered out) ---
+                else if (message.messagetype && message.messagetype.includes('ThreadActivity') && !systemMsgPatternToHide.test(message.content || '')) {
+                     const systemContent = escapeHtml(message.content || 'Group activity');
+                     // Display these as centered system messages
+                     html += `<div class="system-message">System (${time}): ${systemContent}</div>`;
+                }
+                // --- Optionally handle other types like calls if needed ---
+                // else if (message.messagetype && message.messagetype.includes('Event/Call')) {
+                //     const callContent = escapeHtml(message.content || 'Call event');
+                //     html += `<div class="system-message call-info">Call (${time}): ${callContent}</div>`;
+                // }
+                // Ignore other message types (Control/, AddMember, etc.) that are not displayable
+            });
+
+            messagesContent.innerHTML = html;
+            // Scroll to the bottom of the message list
+            messagesContent.scrollTop = messagesContent.scrollHeight;
+        }
+
+        /**
+         * Escapes HTML special characters to prevent XSS and rendering issues.
+         * @param {string} unsafe - The string to escape.
+         * @returns {string} - The escaped string.
+         */
+        function escapeHtml(unsafe) {
+            if (typeof unsafe !== 'string') {
+                 // Return non-strings as-is (e.g., numbers, booleans)
+                 // Be cautious if objects could be passed here unintentionally.
+                 return unsafe;
+            }
+            return unsafe
+				 .replace(/&/g, "&amp;")   // Should be "&"
+				 .replace(/</g, "&lt;")    // Should be "<"
+				 .replace(/>/g, "&gt;")    // Should be ">"
+				 .replace(/"/g, "&quot;")  // Should be """
+				 .replace(/'/g, "&#039;"); // Should be "'"
+        }
+
+    </script>
+</body>
+</html>
