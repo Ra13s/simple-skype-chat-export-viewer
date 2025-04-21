@@ -582,10 +582,11 @@
                    message.messagetype === 'RichText/Media_Card'; // Cards (e.g., polls, location)
         }
 
-        /**
+/**
          * Processes the raw message content based on its type and formats it as HTML.
          * Handles basic formatting (bold, italic, strikethrough, links, preformatted text)
-         * and specific object types like links, images, files.
+         * and specific object types like links, images, files. Also handles HTML entities
+         * and Skype's <ss> emoticons.
          * @param {string} rawContent - The raw content string from the message object.
          * @param {string} messageType - The messagetype string.
          * @returns {string} - HTML-formatted string ready for display.
@@ -596,67 +597,78 @@
 
             // --- Handle standard text/rich text messages ---
             if (messageType === 'RichText' || messageType === 'Text') {
-                // Start by escaping any existing HTML in the content itself
-                content = escapeHtml(rawContent);
+                // START WITH RAW CONTENT - DO NOT ESCAPE THE WHOLE THING INITIALLY
+                content = rawContent;
 
-                // Process known safe HTML tags (basic formatting)
+                // Process known safe HTML tags - matching literal tags now
                 content = content
-                    // Links: Decode '&' in href, ensure https/http, add target/rel
-                    .replace(/<a\s+href="([^&]+)"([^&]*)>(.*?)<\/a>/gi, (match, href, otherAttrs, text) => {
-                        const decodedHref = href.replace(/&/g, '&'); // Decode & -> & in URL
-                        // Basic sanitization of other attributes (allow only spaces and known safe chars)
-                        // This is a very basic attempt, more robust sanitization might be needed for complex cases.
-                        const safeOtherAttrs = (otherAttrs || '').replace(/"/g, '"').replace(/</g, '<').replace(/>/g, '>');
-                        if (decodedHref.startsWith('http://') || decodedHref.startsWith('https://')) {
-                            return `<a href="${escapeHtml(decodedHref)}" ${safeOtherAttrs} target="_blank" rel="noopener noreferrer">${text}</a>`;
+                    // Links: Ensure href is escaped ONLY for the attribute value, add target/rel
+                    .replace(/<a\s+href="([^"]+)"([^>]*)>(.*?)<\/a>/gi, (match, href, otherAttrs, text) => {
+                        // Discard other attributes found within the <a> tag for security/simplicity
+                        const safeOtherAttrs = '';
+                        // ALWAYS escape the href content itself before putting it in the attribute
+                        const escapedHref = escapeHtml(href);
+                        // Basic check if it's a web link
+                        if (escapedHref.startsWith('http://') || escapedHref.startsWith('https://')) {
+                            // Use the inner text provided in the original tag
+                            return `<a href="${escapedHref}" ${safeOtherAttrs} target="_blank" rel="noopener noreferrer">${text}</a>`;
                         } else {
-                            return text; // Don't render non-http(s) links as clickable
+                            // If not http/https, just render the text content of the link, not as a clickable link
+                            return text;
                         }
                     })
-                    // Basic formatting tags
+                    // Basic formatting tags (pass through - these are generally safe)
                     .replace(/<b>(.*?)<\/b>/gi, '<b>$1</b>')
                     .replace(/<i>(.*?)<\/i>/gi, '<i>$1</i>')
                     .replace(/<s>(.*?)<\/s>/gi, '<s>$1</s>')
-                    // Preformatted text (code snippets) - use non-greedy match for content
+                    // Preformatted text: Escape the *content inside* <pre> to prevent rendering tags within code blocks
                     .replace(/<pre.*?>(.*?)<\/pre>/gis, (match, preContent) => {
-                        // Content inside <pre> is already escaped, so return it within real <pre> tags
-                        return `<pre>${preContent}</pre>`;
+                         return `<pre>${escapeHtml(preContent)}</pre>`;
                     })
-                    // Skype smileys/emoticons (render the type as text for now)
-                    .replace(/<ss type="([^&]*)">(.*?)<\/ss>/gi, ' [emoji:$1] ')
-                    // Replace escaped newlines with <br> tags
+                     // Skype smileys/emoticons <ss>: Prioritize alt (emoji), fallback to inner text
+                    .replace(/<ss type="([^"]*)"\s*(?:alt="([^"]*)")?.*?>(.*?)<\/ss>/gi, (match, type, alt, inner) => {
+                        // Use the 'alt' attribute if it exists (usually the emoji), otherwise use the inner text (like :D)
+                        const display = alt ? alt : inner;
+                         // Escape the displayed text/emoji just in case it contains HTML chars, and add a title
+                        return `<span title="Emoji: ${escapeHtml(type)}">${escapeHtml(display)}</span>`;
+                    })
+                    // Replace literal newlines with <br> tags AFTER other processing
                     .replace(/\n/g, '<br>');
 
-                // Handle messages that are effectively empty after processing
-                if (!content.trim().replace(/<br\s*\/?>/gi, '')) {
-                     content = '[Empty message]';
+                // After processing our known tags, the remaining content (including entities like ')
+                // will be handled by the browser when assigned via innerHTML.
+
+                // Final check for effectively empty messages after processing
+                // Use a temporary div to parse the generated HTML and check its text content
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = content; // Let the browser parse the processed HTML (incl. entities)
+                if (!(tempDiv.textContent || tempDiv.innerText || '').trim()) {
+                    content = '[Empty message]';
                  }
 
             // --- Handle shared links, images, videos, files ---
             } else if (messageType === 'RichText/UriObject') {
+                // This part remains largely the same, make sure linkUrl and imgSrc are escaped
                 let linkUrl = '#';
                 let linkText = 'Shared Link/Media';
                 let imgSrc = null;
-                const contentStr = rawContent; // Already a string
+                const contentStr = rawContent;
 
-                // Extract the main URI
                 const uriMatch = contentStr.match(/<URI\s+uri="([^"]+)"/);
                 if (uriMatch && uriMatch[1]) linkUrl = uriMatch[1];
 
-                // Extract Title or Description for link text
                 const titleMatch = contentStr.match(/<Title[^>]*>([^<]+)<\/Title>/);
                 const descMatch = contentStr.match(/<Description[^>]*>([^<]+)<\/Description>/);
-                linkText = escapeHtml(
+                linkText = escapeHtml( // Escape the text part
                     (titleMatch && titleMatch[1])
                     ? titleMatch[1]
-                    : (descMatch && descMatch[1] ? descMatch[1] : linkUrl) // Fallback chain
+                    : (descMatch && descMatch[1] ? descMatch[1] : linkUrl)
                 );
 
-                // Check object type for specific handling
                 if (contentStr.includes('<URIObject type="Picture.1">')) {
                     const thumbMatch = contentStr.match(/url_thumbnail="([^"]+)"/);
                     if (thumbMatch && thumbMatch[1]) imgSrc = thumbMatch[1];
-                    linkText = 'Shared Image';
+                    linkText = 'Shared Image'; // Keep text simple
                 } else if (contentStr.includes('<URIObject type="Video.1">')) {
                     const thumbMatch = contentStr.match(/url_thumbnail="([^"]+)"/);
                     if (thumbMatch && thumbMatch[1]) imgSrc = thumbMatch[1];
@@ -664,28 +676,26 @@
                 } else if (contentStr.includes('<URIObject type="File.1">')) {
                     const fileTitleMatch = contentStr.match(/<Title\s+type="file">([^<]+)<\/Title>/);
                     linkText = `Shared File: ${escapeHtml(fileTitleMatch && fileTitleMatch[1] ? fileTitleMatch[1] : 'Unknown File')}`;
-                     // Note: Skype exports don't contain the actual file, just metadata. Link might be dead.
                 }
 
-                // Construct base HTML (the link)
+                // Construct base HTML (the link) - Ensure linkUrl is escaped here!
                 content = `<a href="${escapeHtml(linkUrl)}" target="_blank" rel="noopener noreferrer">${linkText}</a>`;
 
-                // Add image thumbnail if available
+                // Add image thumbnail if available - Ensure imgSrc is escaped!
                 if (imgSrc) {
                     content += `<br><img src="${escapeHtml(imgSrc)}" alt="${escapeHtml(linkText)} thumbnail" style="max-width: 200px; max-height: 200px; margin-top: 5px; border-radius: 5px; display: block;">`;
                 }
 
             // --- Handle Media Cards (like polls, locations) ---
             } else if (messageType === 'RichText/Media_Card') {
-                // Extract text content by stripping HTML tags
+                // This part also remains largely the same, ensure cardLink is escaped
                 let cardText = rawContent.replace(/<[^>]*>?/gm, '').trim();
-                cardText = cardText || "Card Content"; // Default if no text found
-                // Try to find a link within the card
+                cardText = cardText || "Card Content";
                 const cardLinkMatch = rawContent.match(/<a\s+href="([^"]+)"/);
 
-                content = escapeHtml(cardText);
+                content = escapeHtml(cardText); // Escape the main text
                 if (cardLinkMatch && cardLinkMatch[1]) {
-                    // Add a generic link if one exists in the card data
+                     // Escape the link URL before adding it
                     content += ` <a href="${escapeHtml(cardLinkMatch[1])}" target="_blank" rel="noopener noreferrer">(View Details)</a>`;
                 }
 
