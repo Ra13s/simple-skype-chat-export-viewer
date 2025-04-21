@@ -26,7 +26,7 @@ This tool allows you to browse your exported Skype conversations **locally** in 
 
 ## GitHub Pages (Live Demo)
 
-You can likely use a live version of this tool hosted directly via GitHub Pages (if the repository owner has enabled it). Check the repository's description or settings for a URL typically in the format: `https://<username>.github.io/<repository-name>/`
+You can use a live version of this tool hosted directly via GitHub Pages. Check the repository's description or settings for a URL typically in the format: `https://Ra13s.github.io/simple-skype-chat-export-viewer/`
 
 Using the live version still processes your file locally in *your* browser – your chat data is not sent to the server hosting the page.
 
