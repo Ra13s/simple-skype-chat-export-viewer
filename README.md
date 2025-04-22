@@ -1,4 +1,4 @@
-# Skype Chat Export Viewer
+# Simple Skype Chat Export Viewer
 
 A simple, client-side HTML viewer for Skype `messages.json` export files.
 
